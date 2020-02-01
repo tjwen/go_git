@@ -26,12 +26,12 @@ func (this *PingRouter) PreHandle(request ziface.IRequest) {
 }*/
 //Test Handle
 func (this *PingRouter)Handle(request ziface.IRequest) {
-	fmt.Println("Call Router Handle ...")
+	fmt.Println("Call PingRouter Handle ...")
 	//先读取客户端的数据，再回写pint...ping...ping
 	fmt.Println("recv from client : " +
 		"msgID:=",request.GetMsgID(),
 		"data=",string(request.GetData()))
-	err := request.GetConnection().SendMsg(1, []byte("ping...ping...ping"))
+	err := request.GetConnection().SendMsg(200, []byte("ping...ping...ping"))
 	if err != nil{
 		fmt.Println(err)
 	}
@@ -45,15 +45,30 @@ func (this *PingRouter)Handle(request ziface.IRequest) {
 //		return
 //	}
 //}
+type HelloZinxRouter struct {
+	znet.BaseRouter
+}
+func (this *HelloZinxRouter)Handle(request ziface.IRequest) {
+	fmt.Println("Call HelloZinxRouter Handle ...")
+	//先读取客户端的数据，再回写pint...ping...ping
+	fmt.Println("recv from client : " +
+		"msgID:=",request.GetMsgID(),
+		"data=",string(request.GetData()))
+	err := request.GetConnection().SendMsg(201, []byte("Hello Welcome to Zinx"))
+	if err != nil{
+		fmt.Println(err)
+	}
+}
 
 func main() {
 	//1创建server句柄，使用Zinx的API
-	server := znet.NewServer("[zinx v0.5]")
+	s := znet.NewServer("[zinx v0.6]")
 
 	//给当前zinx框架添加一个自定义的router
-	server.AddRouter(&PingRouter{})
+	s.AddRouter(0,&PingRouter{})
+	s.AddRouter(1,&HelloZinxRouter{})
 	//2启动server
-	server.Serve()
+	s.Serve()
 	//
 
 }

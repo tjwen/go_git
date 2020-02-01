@@ -38,7 +38,7 @@ var GlobalObject *GlobalObj
 /*
 	从zinx.json去加载用于自定义的参数
 */
-func (g *GlobalObj)Reload(){
+func (g *GlobalObj) Reload() {
 	data, err := ioutil.ReadFile("conf/zinx.json")
 	if err != nil {
 		panic(err)
@@ -61,7 +61,7 @@ func init() {
 		Host:           "127.0.0.1",
 		TcpPort:        8999,
 		Name:           "ZinxServerApp",
-		Version:        "V0.4",
+		Version:        "V0.6",
 		MaxConn:        1000,
 		MaxPackageSize: 4096,
 	}

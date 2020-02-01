@@ -19,8 +19,19 @@ type Server struct {
 	Port int
 
 	//当前的Server添加一个router,server注册的链接对用的处理业务
-	Router ziface.IRouter
+	//Router ziface.IRouter
+	MsgHandler ziface.IMsgHandle
 }
+
+//定义当前客户端链接的所绑定的业务 handle api(目前这个handle是写死的，以后优化用户自定义handle方法
+/*func CallBackToClient(conn *net.TCPConn, data []byte,cnt int) error{
+	if _,err := conn.Write(data); err !=nil {
+		fmt.Println("write back buf err :",err)
+		return errors.New("CallBackToClient error")
+	}
+	return nil
+}
+*/
 
 //启动服务器
 func (s *Server) Start() {
@@ -66,7 +77,7 @@ func (s *Server) Start() {
 					}
 				}
 			}()*/
-			dealConn := NewConnection(conn, cid, s.Router)
+			dealConn := NewConnection(conn, cid,s.MsgHandler)
 			cid ++
 			go dealConn.Start()
 		}
@@ -91,8 +102,8 @@ func (s *Server) Serve() {
 }
 
 //路由功能：给当前的服务器注册一个路由方法，供客户端的链接处理使用
-func(s *Server) AddRouter(router ziface.IRouter){
-	s.Router = router
+func(s *Server) AddRouter(msgID uint32,router ziface.IRouter){
+	s.MsgHandler.AddRouter(msgID,router)
 	fmt.Println("Add Router Success!")
 }
 
@@ -102,11 +113,11 @@ func(s *Server) AddRouter(router ziface.IRouter){
 func NewServer(name string) ziface.IServer {
 
 	s := &Server{
-		Name:      utils.GlobalObject.Name,
+		Name:      name,
 		IPVersion: "tcp4",
 		IP:        utils.GlobalObject.Host,
 		Port:      utils.GlobalObject.TcpPort,
-		Router:    nil,
+		MsgHandler:    NewMsgHandle(),
 	}
 	return s
 }
