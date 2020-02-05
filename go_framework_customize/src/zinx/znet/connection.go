@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
+	"zinx/utils"
 	"zinx/ziface"
 )
 
@@ -12,6 +14,8 @@ import (
 	链接模块
 */
 type Connection struct {
+	//当前Conn隶属于哪个Server
+	TcpServer ziface.IServer
 	//当前链接的socket TCP套接字
 	Conn *net.TCPConn
 	//链接的ID
@@ -30,20 +34,29 @@ type Connection struct {
 
 	//消息的管理MsgID和对应的处理业务API关系
 	MsgHandle ziface.IMsgHandle
+
+	//链接属性集合
+	property map[string]interface{}
+	//保护链接属性的锁
+	propertyLock sync.RWMutex
 }
 
 //初始化链接模块的方法
-func NewConnection(conn *net.TCPConn, connID uint32 /*, router ziface.IRouter*/, msgHandler ziface.IMsgHandle) *Connection {
+func NewConnection(server ziface.IServer, conn *net.TCPConn, connID uint32 /*, router ziface.IRouter*/, msgHandler ziface.IMsgHandle) *Connection {
 	c := &Connection{
-		Conn:     conn,
-		ConnID:   connID,
-		isClosed: false, //isClosed为true 意思是关闭
-		msgChan:  make(chan []byte),
+		TcpServer: server,
+		Conn:      conn,
+		ConnID:    connID,
+		isClosed:  false, //isClosed为true 意思是关闭
+		msgChan:   make(chan []byte),
 		//handleAPI: callbackApi,  //不在需要了 换成Router
 		//Router: router,
 		MsgHandle: msgHandler,
 		ExitChan:  make(chan bool, 1),
+		property: make(map[string]interface{}),
 	}
+	//将conn加入到ConnManager中
+	c.TcpServer.GetConnMgr().Add(c)
 	return c
 }
 
@@ -51,18 +64,18 @@ func NewConnection(conn *net.TCPConn, connID uint32 /*, router ziface.IRouter*/,
 	写消息Goroutine ,专门发送给客户端写消息的模块
 */
 
-func (c * Connection) StartWriter()  {
+func (c *Connection) StartWriter() {
 	fmt.Println("[Writer Goroutine ns running]")
-	defer fmt.Println(c.RemoteAddr().String(),"[conn Writer Exit!]")
+	defer fmt.Println(c.RemoteAddr().String(), "[conn Writer Exit!]")
 	//不断阻塞等待channel的消息，进行写给客户端
-	for{
+	for {
 		select {
-			case data := <-c.msgChan:
-				//有数据要写给客户端
-				if _,err := c.Conn.Write(data); err != nil {
-					fmt.Println("Send Data error", err)
-					return
-				}
+		case data := <-c.msgChan:
+			//有数据要写给客户端
+			if _, err := c.Conn.Write(data); err != nil {
+				fmt.Println("Send Data error", err)
+				return
+			}
 		case <-c.ExitChan:
 			//代表Reader
 			return
@@ -122,15 +135,19 @@ func (c *Connection) StartReader() {
 			conn: c,
 			msg:  msg,
 		}
+		if utils.GlobalObject.WorkerPoolSize > 0 {
+			c.MsgHandle.SendMsgToTaskQueue(&req)
+		} else {
+			//根据绑定好的MsgID 找到对应处理api业务 执行
+			go c.MsgHandle.DoMsgHandler(&req)
 
+		}
 		//从路由中，找到注册绑定的Conn对应得router调用
 		/*go func(request ziface.IRequest) {
 			c.Router.PreHandle(request)
 			c.Router.Handle(request)
 			c.Router.PostHandle(request)
 		}(&req)*/
-		//根据绑定好的MsgID 找到对应处理api业务 执行
-		go c.MsgHandle.DoMsgHandler(&req)
 	}
 }
 
@@ -142,7 +159,8 @@ func (c *Connection) Start() {
 	//TODO 启动从当前链接写数据的业务
 	//启动从当前链接写数据的业务
 	go c.StartWriter()
-
+	//按照开发者传递进来的 创建链接之后调用的处理业务，执行对应的HOOK函数
+	c.TcpServer.CallOnConnStart(c)
 }
 
 //停止链接 结束当前链接的工作
@@ -152,10 +170,14 @@ func (c *Connection) Stop() {
 		return
 	}
 	c.isClosed = true
+	//调用开发者注册的 销毁链接之前 需要执行的hook函数
+	c.TcpServer.CallOnConnStop(c)
 	//关闭socket链接
 	c.Conn.Close()
 	//告知Writer关闭
-	c.ExitChan <-true
+	c.ExitChan <- true
+	//将当前连接从ConnMgr中摘除掉
+	c.TcpServer.GetConnMgr().Remove(c)
 	//关闭管道 回收资源
 	close(c.ExitChan)
 	close(c.msgChan)
@@ -190,6 +212,30 @@ func (c *Connection) SendMsg(msgId uint32, data []byte) error {
 		fmt.Println("Write msg id", msgId, "error:", err)
 		return errors.New("conn Write error")
 	}*/
-	c.msgChan <-binaryMsg
+	c.msgChan <- binaryMsg
 	return nil
+}
+
+//设置链接属性
+func (c *Connection )SetProperty(key string, value interface{}){
+	c.propertyLock.Lock()
+	defer c.propertyLock.Unlock()
+	c.property[key] = value
+}
+//获取链接属性
+func (c *Connection )GetProperty(key string)(interface{},error){
+	c.propertyLock.RLock()
+	defer c.propertyLock.Unlock()
+	if value , ok := c.property[key];ok{
+		return value,nil
+	}else{
+		return nil, errors.New("no property found")
+	}
+}
+//移除链接属性
+func (c *Connection )RemoveProperty(key string){
+	c.propertyLock.RLock()
+	defer c.propertyLock.Unlock()
+	//删除属性
+	delete(c.property,key)
 }
